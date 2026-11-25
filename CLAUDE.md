@@ -32,13 +32,21 @@ work and all CI tests are offline.
   - `env.py`, `profile.py`, `instance_discovery.py`, `daemon_auth.py`:
     configuration (`~/.virtuoso-bridge/.env`), profiles, opt-in automatic
     sessions (`VB_AUTO_SESSIONS`) and signed daemon authentication.
+  - `resources/` (top-level package dir, not the server one below): client-side
+    X11 dialog helpers (`x11_dialog_close.py`, `x11_dismiss_dialog.py`).
 - **Server side** (`virtuoso/basic/resources/`): the files deployed to the
   Cadence host. `ramic_bridge.il` is loaded in the CIW, which starts the RAMIC
   daemon through `ipcBeginProcess()`. There are two daemon variants,
-  `ramic_bridge_daemon_3.py` and `ramic_bridge_daemon_27.py`. **Changes to the
-  daemon or its helper modules (`ramic_*.py`) must stay Python 2.7 compatible**,
-  because CI runs real 2.7 workers against them.
-- `mcp_server.py` and `mcp/`: an MCP server that exposes the bridge.
+  `ramic_bridge_daemon_3.py` and `ramic_bridge_daemon_27.py`, plus helper
+  modules (`ramic_deploy.py`, `ramic_registry.py`, `ramic_owner.py`,
+  `ramic_paths.py`, `ramic_request_recovery.py`). **Changes to the daemon or
+  its helper modules must stay Python 2.7 compatible**, because CI runs real
+  2.7 workers against them.
+- `mcp_server.py` and `mcp/`: an MCP server that exposes the bridge (`mcp/`
+  holds an example config and smoke tests).
+- `tools/` (`signoff.py`, `skill_exec.py`, `record_cadence_fixtures.py`) and
+  `scripts/` (`fix-symlinks.sh`, `track_traffic.py`): standalone helpers.
+- `CONTEXT.md`: domain vocabulary.
 - `skills/`: agent skills (virtuoso, spectre, netlist, optimizer, search) with
   references. Read only the one that applies (see AGENTS.md).
 - `docs/`: the static website and guide (`docs/guide/index.html`), ADRs in
@@ -46,6 +54,10 @@ work and all CI tests are offline.
   separate npm package (`npm ci && npm run check && npm test && npm run build`).
 
 ## Common commands
+
+Python `>=3.9`. CI (`.github/workflows/tests.yml`) runs Linux on Python 3.9 and
+3.13. Only the 3.13 job builds a pinned CPython 2.7.18 worker, passed in as
+`VB_TEST_WORKER_PYTHON`, for the native daemon checks.
 
 ```bash
 uv venv .venv && source .venv/bin/activate && uv pip install -e .
@@ -65,6 +77,16 @@ python3 tests/native_instance_registry.py src/virtuoso_bridge/virtuoso/basic/res
 
 ```bash
 python3 tests/native_daemon_concurrency.py src/virtuoso_bridge/virtuoso/basic/resources
+```
+
+X11 dialog native test (needs `xvfb`, `libx11-6`, `libxext6`, `libxtst6`):
+
+```bash
+uv run --extra dev python tests/test_x11_dialog_close_native.py -v
+```
+
+```bash
+uv build
 ```
 
 Live tests (`test_bridge_live*.py`, `test_geometry_regressions_live.py`) need a
