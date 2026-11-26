@@ -29,8 +29,8 @@ import argparse
 from virtuoso_bridge import VirtuosoClient
 from virtuoso_bridge.virtuoso.schematic.ops import (
     schematic_create_inst_by_master_name as inst,
+    schematic_create_wire_between_instance_terms as wire,
     schematic_label_instance_term as label_term,
-    schematic_wire_instance_terms_labeled as wire_labeled,
 )
 from virtuoso_bridge.virtuoso.schematic.params import set_instance_params
 from virtuoso_bridge.virtuoso.ops import escape_skill_string
@@ -84,7 +84,8 @@ def _create_testbench(client: VirtuosoClient, lib: str, dut: str, tb: str) -> No
         sch.add(label_term("V2", "MINUS", GND))
 
         # Pulse source drives the inverter input with a real wire, labelled VIN.
-        sch.add(wire_labeled("V2", "PLUS", "I0", "VIN", "VIN"))
+        sch.add(wire("V2", "PLUS", "I0", "VIN"))
+        sch.add(label_term("I0", "VIN", "VIN"))
 
         # Inverter rails and output.
         sch.add(label_term("I0", "VDD", "VDD"))
