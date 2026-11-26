@@ -25,6 +25,7 @@ Prerequisites:
 from __future__ import annotations
 
 import argparse
+import re
 
 from virtuoso_bridge import VirtuosoClient
 from virtuoso_bridge.virtuoso.schematic.ops import (
@@ -32,7 +33,6 @@ from virtuoso_bridge.virtuoso.schematic.ops import (
     schematic_create_wire_between_instance_terms as wire,
     schematic_label_instance_term as label_term,
 )
-from virtuoso_bridge.virtuoso.schematic.params import set_instance_params
 from virtuoso_bridge.virtuoso.ops import escape_skill_string
 
 GND = "gnd!"
@@ -83,8 +83,10 @@ def _create_testbench(client: VirtuosoClient, lib: str, dut: str, tb: str) -> No
         sch.add(label_term("V1", "MINUS", GND))
         sch.add(label_term("V2", "MINUS", GND))
 
-        # Pulse source drives the inverter input with a real wire, labelled VIN.
+        # Pulse source drives the inverter input. Both ends are labelled VIN,
+        # so they share the net by name even if the routed wire is not drawn.
         sch.add(wire("V2", "PLUS", "I0", "VIN"))
+        sch.add(label_term("V2", "PLUS", "VIN"))
         sch.add(label_term("I0", "VIN", "VIN"))
 
         # Inverter rails and output.
@@ -93,12 +95,68 @@ def _create_testbench(client: VirtuosoClient, lib: str, dut: str, tb: str) -> No
         sch.add(label_term("I0", "VOUT", "VOUT"))
         # schCheck + dbSave happen on context exit
 
-    # set_instance_params acts on the current schematic window, so open the
-    # testbench first.
+    # Set the source values on the testbench cellview itself (not on whichever
+    # window is current), save, and read every value back.
+    for name, params in (("V0", {"vdc": VDD_VALUE}), ("V1", {"vdc": VSS_VALUE}), ("V2", PULSE)):
+        _set_cdf_params(client, lib, tb, name, params)
+    _verify_vin_net(client, lib, tb)
     client.open_window(lib, tb, view="schematic")
-    set_instance_params(client, "V0", vdc=VDD_VALUE, param_filters=None)
-    set_instance_params(client, "V1", vdc=VSS_VALUE, param_filters=None)
-    set_instance_params(client, "V2", param_filters=None, **PULSE)
+
+
+def _q(text: str) -> str:
+    return f'"{escape_skill_string(text)}"'
+
+
+def _set_cdf_params(client: VirtuosoClient, lib: str, cell: str, inst_name: str,
+                    params: dict[str, str]) -> None:
+    """Write CDF parameters of one instance in lib/cell/schematic, save, and verify them."""
+    sets = " ".join(
+        f"p = cdfFindParamByName(cdf {_q(k)}) "
+        f"unless(p error(\"%s has no CDF parameter %s\" {_q(inst_name)} {_q(k)})) "
+        f"p~>value = {_q(v)}"
+        for k, v in params.items()
+    )
+    reads = " ".join(f"cdfFindParamByName(cdf {_q(k)})~>value" for k in params)
+    skill = (
+        "let((cv inst cdf p) "
+        f"cv = dbOpenCellViewByType({_q(lib)} {_q(cell)} \"schematic\" nil \"a\") "
+        f"unless(cv error(\"cannot open %s/%s/schematic for edit\" {_q(lib)} {_q(cell)})) "
+        f"inst = dbFindAnyInstByName(cv {_q(inst_name)}) "
+        f"unless(inst error(\"instance %s not found\" {_q(inst_name)})) "
+        "cdf = cdfGetInstCDF(inst) "
+        f"{sets} "
+        "schCheck(cv) dbSave(cv) "
+        f"list({reads}))"
+    )
+    result = client.execute_skill(skill)
+    if result.errors:
+        raise SystemExit(f"Setting {inst_name} parameters failed: {result.errors}")
+    got = re.findall(r'"([^"]*)"', result.output or "")
+    expected = list(params.values())
+    if got != expected:
+        raise SystemExit(
+            f"{inst_name} parameters did not stick: wanted {dict(zip(params, expected))}, "
+            f"read back {result.output}"
+        )
+    print(f"  {inst_name}: " + ", ".join(f"{k}={v}" for k, v in params.items()))
+
+
+def _verify_vin_net(client: VirtuosoClient, lib: str, cell: str) -> None:
+    """Fail unless V2 PLUS and I0 VIN are on the same net, named VIN."""
+    skill = (
+        "let((cv) "
+        f"cv = dbOpenCellViewByType({_q(lib)} {_q(cell)} \"schematic\") "
+        "mapcar(lambda((it) list(it~>inst~>name it~>name it~>net~>name)) "
+        "setof(it cv~>instTerms "
+        "(it~>inst~>name == \"V2\" && it~>name == \"PLUS\") || "
+        "(it~>inst~>name == \"I0\" && it~>name == \"VIN\"))))"
+    )
+    output = client.execute_skill(skill).output or ""
+    nets = dict(((a, b), n) for a, b, n in re.findall(r'\("([^"]+)" "([^"]+)" "([^"]+)"\)', output))
+    v2, i0 = nets.get(("V2", "PLUS")), nets.get(("I0", "VIN"))
+    if v2 != "VIN" or i0 != "VIN":
+        raise SystemExit(f"VIN is not connected: V2 PLUS is on {v2!r}, I0 VIN is on {i0!r} ({output})")
+    print("  VIN net: V2 PLUS and I0 VIN connected")
 
 
 def main() -> int:

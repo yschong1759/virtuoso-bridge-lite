@@ -186,6 +186,19 @@ def plot_waveforms(path: Path, waves: dict[str, tuple[list[float], list[float]]]
     print(f"[plot] {path}")
 
 
+def check_vin(t: list[float], v: list[float], expected_swing: float = 0.9) -> None:
+    """Stop with a diagnosis when VIN is not the expected square wave."""
+    vmin, vmax = min(v), max(v)
+    print(f"[check] VIN min {vmin:.4f} V, max {vmax:.4f} V")
+    if vmax - vmin < 0.5 * expected_swing:
+        raise SystemExit(
+            "VIN does not toggle, so the pulse source is not driving it. In "
+            "tb_inv_sch, check that V2 (vpulse) has v1=0, v2=900m, per=10n and that "
+            "its PLUS terminal is on net VIN. Recreate the testbench with "
+            "`python sim_inv_sch.py <LIB> --overwrite`, which sets and verifies both."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Edge analysis
 # ---------------------------------------------------------------------------
@@ -306,6 +319,7 @@ def main() -> int:
 
     plot_waveforms(args.out_dir / f"{cell}_{history}_VIN_VOUT.png", waves,
                    f"{lib}/{cell}  {history}  transient")
+    check_vin(*waves["VIN"])
     edges, low, high = measure_edges(*waves["VOUT"])
     report_edges(edges, low, high, args.out_dir / f"{cell}_{history}_VOUT_edges.csv")
     return 0
